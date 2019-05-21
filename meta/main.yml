@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: duoauthproxy
+  author: "Rich Nason"
+  description: "Role to install the Duo Authentication Proxy on RHEL|CentOS"
+  company: "Atlantean Enterprises LLC"
+  license: "license (MIT, BSD)"
+  min_ansible_version: 2.0
+  platforms:
+    - name: EL
+      versions:
+        - 6
+        - 7
+  galaxy_tags:
+    - mfa
+    - services
+dependencies: []

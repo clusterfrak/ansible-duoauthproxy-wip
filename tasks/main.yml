@@ -1,0 +1,253 @@
+---
+# =====================================
+# Install Duo Dependancy Packages
+# =====================================
+- name: Installing Epel Yum Repository...
+  yum:
+    name:
+      - epel-release
+    state: present
+  tags:
+    - duo:deps
+
+- name: Installing Duo Auth Proxy dependancy packages...
+  yum:
+    name:
+      - python
+      - python-pip
+      - python-devel
+      - perl
+      - gcc
+      - make
+      - libffi-devel
+      - zlib-devel
+      - wget
+      - curl
+      - initscripts
+    state: present
+  tags:
+    - duo:deps
+
+# ========================================
+# Download the Duo Auth Proxy Source Code.
+# ========================================
+# get_url not used as Python < 3 fails SSL verification on the download file link
+# Download the Duo Auth Proxy Latest TarGZ
+- name: Downloading the Duo Authentication Proxy...
+  command: wget -O /tmp/duoauthproxy-latest-src.tgz https://dl.duosecurity.com/duoauthproxy-latest-src.tgz
+  args:
+    warn: False
+  register: download_duo
+  failed_when: download_duo.rc != 0
+  changed_when: True
+  tags:
+    - duo:install
+
+# Verify that the file downloaded correctly.
+- name: Verifying Duo Authentication Proxy Download...
+  stat: path=/tmp/duoauthproxy-latest-src.tgz
+  register: duo_latest
+  changed_when: False
+  tags:
+    - duo:install
+    - duo:facts
+
+# Set a flag stating the Duo Auth Proxy download State.
+- name: Checking Duo Authentication Proxy TarGZ...
+  set_fact:
+    duo_downloaded: "{{ 'true' if duo_latest.stat.exists else 'false' }}"
+  changed_when: False
+  tags:
+    - duo:install
+    - duo:facts
+
+- name: "Duo Authentication Proxy Tar File Download Status:"
+  debug:
+    msg: "{{ 'FILE FOUND' if duo_downloaded else 'FILE NOT FOUND' }}"
+  changed_when: False
+  tags:
+    - duo:install
+    - duo:facts
+
+# Unpack the Duo Auth Proxy downloaded tar.gz file and register version.
+- name: Unpacking the Duo Authentication Proxy package...
+  unarchive:
+    src: /tmp/duoauthproxy-latest-src.tgz
+    dest: /tmp
+  when: duo_downloaded
+  tags:
+    - duo:install
+
+- name: Getting Duo Version Directory...
+  command: tar --exclude '*/*' -tf /tmp/duoauthproxy-latest-src.tgz
+  args:
+    warn: False
+  register: duo_dir
+  failed_when: duo_dir.rc != 0
+  changed_when: False
+  when: duo_downloaded
+  tags:
+    - duo:install
+    - duo:facts
+
+- name: "Duo Auth Proxy Version {{ duo_dir.stdout }} found..."
+  debug:
+    msg: "Duo Authentication Proxy Version: {{ duo_dir.stdout }}"
+  changed_when: False
+  when: duo_downloaded
+  tags:
+    - duo:install
+    - duo:facts
+
+# ========================================
+# Compile the Duo Auth Proxy Source Code.
+# ========================================
+# Compile the Duo Src Code with make
+- name: Building Duo Source Code...
+  make:
+    chdir: "/tmp/{{ duo_dir.stdout }}"
+  when: duo_downloaded
+  tags:
+    - duo:install
+
+# Install the Duo Src Code with make install
+- name: Installing Duo Authentication Proxy...
+  command: /tmp/{{ duo_dir.stdout }}/duoauthproxy-build/install --install-dir /opt/duoauthproxy --service-user duo_authproxy_svc --log-group duo_authproxy_grp --create-init-script yes
+  register: install_duo
+  failed_when: install_duo.rc != 0
+  changed_when: False
+  when: duo_downloaded
+  tags:
+    - duo:install
+
+# Verify the Install
+- name: Verifying Duo Authentication Proxy Installation...
+  stat: path=/opt/duoauthproxy/conf/authproxy.cfg
+  register: duo_default_config
+  changed_when: False
+  tags:
+    - duo:install
+    - duo:facts
+
+# Set a flag stating the Duo Auth Proxy install State.
+- name: Checking Duo Authentication Proxy Installation...
+  set_fact:
+    duo_installed: "{{ 'true' if duo_default_config.stat.exists else 'false' }}"
+  changed_when: False
+  tags:
+    - duo:install
+    - duo:facts
+
+- name: "Duo Authentication Proxy Intallation Status:"
+  debug:
+    msg: "{{ 'INSTALLATION SUCCESSFUL!' if duo_installed else 'INSTALLATION FAILED!' }}"
+  changed_when: False
+  tags:
+    - duo:install
+    - duo:facts
+
+# ========================================
+# Configure the Authentication Proxy.
+# ========================================
+# Use this template if the mode is set to AWS_WORKSPACES
+- name: Configuring Duo Authentication Proxy...
+  template: src=aws_workspaces.j2 dest=/opt/duoauthproxy/conf/authproxy.cfg owner=duo_authproxy_svc group=duo_authproxy_grp mode=0644
+  when:
+    - duo_installed
+    - duo_mode == 'aws_workspaces'
+  tags:
+    - duo:config
+
+- name: Checking Duo Authentication Proxy Config...
+  shell: |
+    set -o pipefail
+    cat /opt/duoauthproxy/conf/authproxy.cfg
+  args:
+    warn: False
+  register: duo_configuration
+  failed_when: duo_configuration.rc != 0
+  changed_when: False
+  when: duo_installed
+  tags:
+    - duo:install
+    - duo:facts
+
+- name: Verifying Duo Authentication Proxy Configuration...
+  debug:
+    msg: "{{ duo_configuration.stdout_lines }}"
+  changed_when: False
+  when: duo_installed
+  tags:
+    - duo:install
+    - duo:facts
+
+# ========================================================
+# Configure Startup Scripts. (Handled by Duo Installation)
+# ========================================================
+# If the host is EL 6 then install the init script
+# - name: Installing Duo Service Init Script (EL6)...
+#   template: src=duo_service.j2 dest=/etc/init.d/duoauthproxy owner=duo_authproxy_svc group=duo_authproxy_grp mode=0775
+#   when:
+#     - duo_installed
+#     - ansible_distribution_major_version < '7'
+#   tags:
+#     - duo:install
+#     - duo:service
+
+# # If the host is => EL 7 then install the systemd unit file
+# - name: Installing Duo Service Unit File (EL7)...
+#   template: src=duo.service.j2 dest=/usr/lib/systemd/system/duoauthproxy.service owner=duo_authproxy_svc group=duo_authproxy_grp mode=0775
+#   when:
+#     - duo_installed
+#     - ansible_distribution_major_version > '6'
+#   tags:
+#     - duo:install
+#     - duo:service
+
+# ==========================================
+# Start the Duo Authentication Proxy service
+# ==========================================
+- name: Starting the Duo Authentication Proxy Daemon (duoauthproxy) (EL 7)...
+  systemd:
+    name: duoauthproxy
+    state: started
+  when:
+    - duo_installed
+    - ansible_distribution_major_version > '6'
+  tags:
+    - duo:install
+    - duo:service
+
+- name: Starting the Duo Authentication Proxy Daemon (duoauthproxy) (EL 7)...
+  service:
+    name: duoauthproxy
+    state: started
+  when:
+    - duo_installed
+    - ansible_distribution_major_version < '7'
+  tags:
+    - duo:install
+    - duo:service
+
+- name: Gathering Service States...
+  service_facts:
+  changed_when: False
+  when:
+    - duo_installed
+  tags:
+    - duo:install
+    - duo:service
+    - duo:facts
+
+- name: "Duoauthproxy Service State:"
+  debug:
+    msg: "{{ ansible_facts.services['duoauthproxy.service'] if ansible_distribution_major_version > '6' else ansible_facts.services['duoauthproxy'] }}"
+  changed_when: False
+  when:
+    - duo_installed
+  tags:
+    - duo:install
+    - duo:service
+    - duo:facts
+
+#/opt/duoauthproxy/uninstall.

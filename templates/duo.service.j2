@@ -1,0 +1,14 @@
+[Unit]
+Description=Duo Authentication Proxy
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/var/spool/duoauthproxy/pid/duoauthproxy.pid
+ExecStart=/opt/duoauthproxy/bin/authproxyctl start
+ExecReload=/opt/duoauthproxy/bin/authproxyctl restart
+ExecStop=/opt/duoauthproxy/bin/authproxyctl stop
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
