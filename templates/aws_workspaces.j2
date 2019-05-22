@@ -31,6 +31,3 @@ radius_secret_2={{ secondary_radius_secret }}
 {% endif %}
 port={{ radius_port }}
 failmode= {{ failmode }}
-{% if 'duo_only_client' not in client %}
-client={{ client }}
-{% endif %}

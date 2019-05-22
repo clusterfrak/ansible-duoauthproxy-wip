@@ -1,0 +1,574 @@
+AWSTemplateFormatVersion: "2010-09-09"
+# Description of what this CloudFormation Template is going to produce
+Description: AWS CloudFormation Duo Authentication Proxy Template to create Dou Push MFA Auth for resources.
+# Define Parameter Variables that will be used throughout this Cloudformation template.
+
+# TODO: Instance, Associate public IP SET TO FALSE
+
+#============
+# Parameters:
+# Define Parameter Variables that will be used throughout this CloudFormation template.
+#============
+Parameters:
+  #-------------------------
+  # Application Parameters:
+  #-------------------------
+  DuoMode:
+    Type: String
+    Description: Specify the type of deployment for the Duo Auth Proxy. (More deployment methods coming soon)
+    AllowedValues:
+      - 'aws_workspaces'
+    Default: aws_workspaces
+
+  DuoIntegrationKey:
+    Description: Specify the Duo Integration Key that was produced by adding the new application in the Duo Admin Console.
+    Type: String
+    NoEcho: true
+    # Match any character from 1 to 50 characters
+    AllowedPattern: "(.{1,50})"
+    ConstraintDescription: Duo Integration Key is a requried field and must be < 50 characters!
+
+  DuoIntegrationSecret:
+    Description: Specify the Duo Integration Key Secret that was produced by adding the new application in the Duo Admin Console.
+    Type: String
+    NoEcho: true
+    # Match any character from 1 to 100 characters
+    AllowedPattern: "(.{1,100})"
+    ConstraintDescription: Duo Secret Key is a requried field and must be < 100 characters!
+
+  DuoAPIURL:
+    Description: Specify the Duo Integration API URL that was produced by adding the new application in the Duo Admin Console.
+    Type: String
+    # Match a string such as api-xxxxxxxx.duosecurity.com. api- and duosecurity.com must be exact, any 12 digits after api-
+    AllowedPattern: "(api)-(.{1,12}).(duosecurity.com)"
+    ConstraintDescription: Duo API Host URL must be formatted as in the example api-xxxxxxxx.duosecurity.com
+
+  DouPrimaryRadiusIP:
+    Description: Specify the IP address of the Primary AD Connector IP found in the AWS console under Dirctory Services.
+    Type: String
+    MinLength: 7
+    MaxLength: 15
+    # Match a valid IP address string. Each octet must be 1-2 valid digits (\d)(1,3)
+    AllowedPattern: "(\\d{1,3}).(\\d{1,3}).(\\d{1,3}).(\\d{1,3})"
+    ConstraintDescription: Must be a valid IP address with the standard x.x.x.x format.
+  
+  DuoPrimaryRadiusPSK:
+    Description: Specify a shared key that will be used by the AWS resource to validate against the Duo Auth Proxy.
+    Type: String
+    NoEcho: true
+    # Match any character from 1 to 100 characters
+    AllowedPattern: "(.{1,100})"
+    ConstraintDescription: The Radius Shared Key is a requried field and must be < 100 characters!
+
+  DuoSecondaryRadiusIP:
+    Description: Specify the IP address of the Secondary AD Connector Server found in the AWS console under Dirctory Services. (Leave set to 127.0.0.1 to disable secondary Radius server)
+    Type: String
+    MinLength: 7
+    MaxLength: 15
+    # Match a valid IP address string. Each octet must be 1-2 valid digits (\d)(1,3)
+    AllowedPattern: "(\\d{1,3}).(\\d{1,3}).(\\d{1,3}).(\\d{1,3})"
+    ConstraintDescription: Must be a valid IP address with the standard x.x.x.x format.
+    Default: '127.0.0.1'
+  
+  DuoSecondaryRadiusPSK:
+    Description: Specify a shared key that will be used by the AWS resource to validate against the Duo Auth Proxy.
+    Type: String
+    NoEcho: true
+    # Match any character from 1 to 100 characters
+    AllowedPattern: "(.{1,100})"
+    ConstraintDescription: The Radius Shared Key is a requried field and must be < 100 characters!
+    Default: 'Disabled'
+
+  DuoRadiusPort:
+    Description: Specify the port that the Duo Auth Proxy is listening on for Radius Requests.
+    Type: Number
+    MinValue: 1
+    MaxValue: 65535
+    Default: 1812
+    # Match Number between 1-65535
+    AllowedPattern: "^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
+    ConstraintDescription: Must be a valid port between 1 and 5 digits in the range of 1 to 65535
+
+  DuoFailMode:
+    Description: Specify if the user will still be able to login if the resource is unable to connect (safe) or will be denied if unable to connect to the Duo Auth Proxy (secure)
+    Type: String
+    Default: 'safe'
+    AllowedValues:
+      - 'safe'
+      - 'secure'
+  
+  #-------------------------
+  # EC2 Parameters:
+  #-------------------------
+  EC2HostName:
+    Type: String
+    Description: Specify the instance HostName for the Duo Authentication Proxy.
+    # Match any word, digit (\w), or the 5 specified special characters (#*._-). Max Length 63 characters (unix limit)
+    AllowedPattern: "([\\w#*._-]{1,63})"
+    ConstraintDescription: "Hostname must contain any character, digit, or the special characters #*._- Maximum hostname length is set to 63 chars"
+    Default: DuoAuthProxy
+
+  EC2InstanceStaticIP:
+    Description: Optionally specify a Private Static IP Address to assign to the EC2 Instance. This must be a valid IP within the subnet where launched. (Leave set to 127.0.0.1 to get DHCP address from VPC)
+    Type: String
+    MinLength: 7
+    MaxLength: 15
+    Default: '127.0.0.1'
+    # Match a valid IP address string. Each octet must be 1-2 valid digits (\d)(1,3)
+    AllowedPattern: "(\\d{1,3}).(\\d{1,3}).(\\d{1,3}).(\\d{1,3})"
+    ConstraintDescription: Must be a valid IP address with the standard x.x.x.x format.
+
+  EC2InstanceType:
+    Type: String
+    Description: Specify the instance type that will be used by both the Jenkins Slave and the Jenkins Proxy
+    AllowedValues:
+      - t2.small
+      - t2.medium
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - t3.nano
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m4.10xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - m5.12xlarge
+      - m5.24xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+      - c5.18xlarge
+    Default: t3.small
+
+  EC2TermProtection:
+    Description: Choose if the instance should have Termination Protection Enabled or not.
+    Type: String
+    AllowedValues:
+      - 'Enabled'
+      - 'Disabled'
+    Default: 'Disabled'
+  
+  EC2KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the FreeIpa instances.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
+  #-------------------------
+  # VPC Parameters:
+  #-------------------------
+  VPCId:
+    Description: Specify the VPC that you want to place the FreeIpa master directory server into.
+    Type: AWS::EC2::VPC::Id
+    ConstraintDescription: Must be the id of a valid VPC.
+
+  SubnetId:
+    Description: Specify the Subnet that you want to place the FreeIpa master directory server into.
+    Type: AWS::EC2::Subnet::Id
+    ConstraintDescription: Must be the id of a valid Subnet within your VPC.
+
+  SSHRemoteIP:
+    Description: Optionally set the source IP address (/32) or source IP address range (x.x.x.x/x) that will be allowed to SSH to the DuoAuthProxy SG (Leave to 127.0.0.1 to reject external SSH connections.)
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    # Match a valid CIDR IP address string. Each octet must be 1-2 valid digits (\d)(1,3) and CIDR must be between /8-/32
+    # Number Matches work as singles place, or tens place then singles place, so [1-2][0-9] would be 10-29, 3[0-2] would be 30-32
+    AllowedPattern: "(\\d{1,3}).(\\d{1,3}).(\\d{1,3}).(\\d{1,3})/([8-9]|[1-2][0-9]|3[0-2])"
+    ConstraintDescription: 'Must be a valid CIDR formatted IP address such as x.x.x.x/x (Example - 10.0.0.1/32). Leave set to 127.0.0.1/32 if no external SSH connections should be allowed.'
+    Default: '127.0.0.1/32'
+
+# ===============================
+# MetaData:
+# Define how the CF Template will render.
+# ===============================
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Duo Auth Proxy Configuration:"
+        Parameters:
+          - DuoMode
+          - DuoIntegrationKey
+          - DuoIntegrationSecret
+          - DuoAPIURL
+          - DouPrimaryRadiusIP
+          - DuoPrimaryRadiusPSK
+          - DuoRadiusPort
+          - DuoFailMode
+      - Label:
+          default: "EC2 Instance Configuration:"
+        Parameters:
+          - EC2HostName
+          - EC2InstanceType
+          - EC2TermProtection
+          - EC2KeyName
+      - Label:
+          default: "VPC Configuration:"
+        Parameters:
+          - VPCId
+          - SubnetId
+      - Label:
+          default: "Optional Configuration (These Values can be left to their default values to stay DISABLED!):"
+        Parameters:
+          - DuoSecondaryRadiusIP
+          - DuoSecondaryRadiusPSK
+          - EC2InstanceStaticIP
+          - SSHRemoteIP
+
+#===============================
+# Mappings:
+#===============================
+Mappings: 
+  RegionMap: 
+    'us-east-1': 
+      AMI: 'ami-02eac2c0129f6376b'
+    'us-east-2': 
+      AMI: 'ami-0f2b4fc905b0bd1f1'
+    'us-west-1': 
+      AMI: 'ami-074e2d6769f445be5'
+    'us-west-2': 
+      AMI: 'ami-01ed306a12b7d1c96'
+
+#===============================
+# Conditions:
+# Define conditions that can be used to launch certain resources.
+#===============================
+Conditions:
+  # Condition to see if Terminiation Protection is set to enabled
+  EnableTerminationProtection: !Equals [!Ref 'EC2TermProtection', 'Enabled']
+  
+  # Condition to see if Secondary Radius Settings were set, if so, check both conditions to see if the default values were replaced.
+  SecondaryRadiusServer: !Not [!Equals [!Ref DuoSecondaryRadiusIP, '127.0.0.1']]
+  SecondaryRadiusPSK: !Not [!Equals [!Ref DuoSecondaryRadiusPSK, 'Disabled']]
+  
+  # If both Secondary Radius Conditions are true, then set SecondaryRadius as true
+  SecondaryRadius: !And
+    - !Condition SecondaryRadiusServer
+    - !Condition SecondaryRadiusPSK
+  
+  # Condition to see if a static IP should be assigned to the server. If not default value of localhost, then Condition is set true
+  SetEC2StaticIP: !Not [!Equals [!Ref EC2InstanceStaticIP, '127.0.0.1']]
+  
+  # Condition to see if a Remote SSH IP should be assigned to the inbound Security Groups. If not default value of localhost, then Condition is set true
+  # SetSSHRemoteIP: !Not [!Equals [!Ref SSHRemoteIP, '127.0.0.1/32']]
+
+#===============================
+# Resources:
+# Define Resources that will be launched via this template
+#===============================
+Resources:
+  #---------------------
+  # SecurityGroups
+  #---------------------
+  # SSH Security Group
+  DuoSSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: "Allow Outbound Traffic to Any."
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-DuoAuthProxy-SSH-SG'
+      GroupDescription: Security Group that will be used for allowing SSH connections to the DuoAuthProxy. Open ports 22 to SSHRemoteIP only
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHRemoteIP
+      SecurityGroupEgress:
+        - IpProtocol: 'tcp'
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHRemoteIP
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-DuoAuthProxy-SSH-SG'
+
+  # Radius Security Group
+  DuoRadiusSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: "Allow Outbound DNS Query to any."
+          - id: W27
+            reason: "Allow InBound any from same SG."
+          - id: W29
+            reason: "Allow Outbound any to Client SG."
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-DuoAuthProxy-Radius-SG'
+      GroupDescription: Security Group that will be used for Radius access to the DuoAuthProxy instance. Open Radius services ports to Client Security Group Only
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: !Ref DuoRadiusPort
+          ToPort: !Ref DuoRadiusPort
+          SourceSecurityGroupId: !Ref DuoClientSecurityGroup
+        - IpProtocol: '-1'
+          FromPort: !Ref DuoRadiusPort
+          ToPort: !Ref DuoRadiusPort
+          CidrIp: !Ref DouPrimaryRadiusIP
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 53
+          ToPort: 53
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-DuoAuthProxy-Radius-SG'
+
+  # Add the Secondary Radius Server to the DuoRadiusSecurityGroup if it was set.
+  DuoConditionalAddSecondaryRadiusIP:
+    Condition: SecondaryRadius
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'DuoRadiusSecurityGroup'
+      IpProtocol: '-1'
+      FromPort: !Ref DuoRadiusPort
+      ToPort: !Ref DuoRadiusPort
+      CidrIp: !Ref DuoSecondaryRadiusIP
+  
+  # Add the Radius Security Group to the Same Security Group.
+  DuoRadiusAddSameSecurityGroup:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'DuoRadiusSecurityGroup'
+      IpProtocol: '-1'
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref DuoRadiusSecurityGroup
+
+  # Client Access to DuoAuthProxy Server SG
+  DuoClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: "Allow Outbound DNS Query to any."
+          - id: W27
+            reason: "Allow InBound any from same SG."
+          - id: W29
+            reason: "Allow Outbound any to Client SG."
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-DuoAuthProxy-Client-Radius-SG'
+      GroupDescription: Security Group that will be used for Client instances. This SG will allow an instance to communicate with the Duo Authentication Proxy.
+      VpcId: !Ref VPCId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-DuoAuthProxy-Client-Radius-SG'
+
+  # Set Egress Rule to allow Client traffic to go to the DuoAuthProxy
+  DuoClientAddServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref 'DuoClientSecurityGroup'
+      IpProtocol: '-1'
+      ToPort: !Ref DuoRadiusPort
+      DestinationSecurityGroupId: !Ref DuoRadiusSecurityGroup
+
+  #-------------------------
+  # DuoAuthProxy Instance:
+  #-------------------------
+  DouAuthProxyInstance:
+    # Description: Duo Authentication Proxy EC2 Instance
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        # configSets is used when there are multiple configs that you want to run, for multiple instances. If not needed then just config (default) is adequate.
+        configSets:
+          default:
+            - config
+            - DuoConfig
+        # This configSet preps the instance for the Duo install.
+        DuoConfig:
+          packages:
+            yum:
+              python2-pip: []
+              iproute: []
+              ansible: []
+              net-tools: []
+              git: []
+              jq: []
+          commands:
+            01_install_awscli:
+              command: pip install awscli
+            02_ansible_localhost:
+              command: echo localhost ansible_connection=local > /etc/ansible/hosts
+            03_ansible_galaxy_install_roles:
+              command: ansible-galaxy install --ignore-certs atlantean.duoauthproxy
+            04_run_playbook:
+              command: cd /etc/ansible && source /etc/environment && ansible-playbook -v install.yml 2>&1 | tee > /var/log/ansible.log
+          files:
+            '/etc/ansible/install.yml':
+              content: !Sub |
+                - hosts: localhost
+                  become: true
+                  roles:
+                    - atlantean.duoauthproxy
+              mode: '000775'
+              owner: root
+              group: root
+
+        # Default Config, which handles installing the firewall, and CFN components to talk back to CloudFormation
+        config:
+          packages:
+            yum:
+              firewalld: []
+          commands:
+            01_update:
+              command: sudo yum -y update
+          files:
+            '/etc/cfn/cfn-hup.conf':
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                interval=1
+              mode: '000400'
+              owner: root
+              group: root
+            '/etc/cfn/hooks.d/cfn-auto-reloader.conf':
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.FreeIpaMasterInstance.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init --verbose --stack=${AWS::StackName} --region=${AWS::Region} --resource=FreeIpaMasterInstance
+                runas=root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                  - '/etc/cfn/cfn-hup.conf'
+                  - '/etc/cfn/hooks.d/cfn-auto-reloader.conf'
+              firewalld:
+                enabled: true
+                ensureRunning: true
+
+    # Properties of the Instance that we are launching. Here we define things like EBS volumes, SG's, The AMI used, etc..
+    Properties:
+      # Pull the Image or AMI from the RegionMap Map we defined earlier
+      InstanceType: !Ref 'EC2InstanceType'
+      KeyName: !Ref 'EC2KeyName'
+      ImageId: !FindInMap [ RegionMap, !Ref 'AWS::Region', AMI]
+      DisableApiTermination: !If [EnableTerminationProtection, true, false]
+      # Pull the Intance Type, Subnet, KeyName, etc from the Parameters we defined earlier
+      SubnetId: !Ref SubnetId
+      PrivateIpAddress: !If [SetEC2StaticIP, !Ref EC2InstanceStaticIP, !Ref 'AWS::NoValue']
+      SecurityGroupIds:
+        - !Ref DuoSSHSecurityGroup
+        - !Ref DuoRadiusSecurityGroup
+      Tags:
+       - Key: Name
+         Value: !Sub '${AWS::StackName}-Duo-Authentication-Proxy'
+      # Use the user data to instantiate the cfn service, which will report back to CloudFormaton once the instance is set up
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash -x
+            yum --enablerepo=extras install -y epel-release
+            yum install -y https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.amzn1.noarch.rpm
+            ln -s /usr/local/lib/python2.7/site-packages/cfnbootstrap /usr/lib/python2.7/site-packages/cfnbootstrap
+            echo "hostnamectl set-hostname ${EC2HostName}" > /etc/environment
+            echo "export HOSTNAME=${EC2HostName}" >> /etc/environment
+            echo "export DUO_MODE=${DuoMode}" >> /etc/environment
+            echo "export DUO_ACCESS_KEY=${DuoIntegrationKey}" >> /etc/environment
+            echo "export DUO_SECRET_KEY=${DuoIntegrationSecret}" >> /etc/environment
+            echo "export DUO_API_URL=${DuoAPIURL}" >> /etc/environment
+            echo "export PRIMARY_RADIUS_IP=${DouPrimaryRadiusIP}" >> /etc/environment
+            echo "export PRIMARY_RADIUS_SECRET=${DuoPrimaryRadiusPSK}" >> /etc/environment
+            if [ "${SECOND_RADIUS_EXISTS}" ]; then
+              echo "export SECONDARY_RADIUS_IP=${DuoSecondaryRadiusIP}" >> /etc/environment
+              echo "export SECONDARY_RADIUS_SECRET=${DuoSecondaryRadiusPSK}" >> /etc/environment
+            fi
+            echo "export RADIUS_PORT=${DuoRadiusPort}" >> /etc/environment
+            echo "export DUO_FAILSAFE_MODE=${DuoFailMode}" >> /etc/environment
+            source /etc/environment
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource FreeIpaMasterInstance --region ${AWS::Region}
+            /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource FreeIpaMasterInstance
+          - SECOND_RADIUS_EXISTS: !If [SecondaryRadius, 'True', 'False']
+    # Creation Policy will ensure that if the instance isn't complete within the specified window, that a rollback will occur
+    CreationPolicy:
+      ResourceSignal:
+        Count: '1'
+        Timeout: PT15M
+
+#===================================
+# Outputs:
+# Specify any outputs for the stack.
+#====================================
+Outputs:
+  # Security Groups:
+  DuoSSHSecurityGroupName:
+    Description: 'The Name of the Security Group created to allow SSH access from the specified SSHRemoteIP Value'
+    Value: !Ref 'DuoSSHSecurityGroup'
+    Export:
+      Name: DuoAuthProxy-SSH-SecurityGroup
+
+  DuoRadiusSecurityGroupName:
+    Description: 'The Name of the Security Group created to allow Radius access from the Client Security Group to the DuoAuthProxy Instance'
+    Value: !Ref 'DuoRadiusSecurityGroup'
+    Export:
+      Name: DuoAuthProxy-Radius-SecurityGroup
+
+  DuoClientSecurityGroupName:
+    Description: 'The Name of the Security Group created to allow resource access the DuoAuthProxy Radius Services.'
+    Value: !Ref 'DuoClientSecurityGroup'
+    Export:
+      Name: DuoAuthProxy-Client-SecurityGroup
+
+  # DuoAuthProxy Server:
+  DouAuthProxyInstanceId:
+    Description: 'The ID of the Duo Authentication Proxy Server that was created.'
+    Value: !Ref 'DouAuthProxyInstance'
+  
+  DouAuthProxyInstanceAZ:
+    Description: 'The Availability Zone that the Duo Authentication Proxy Server was launched in.'
+    Value: !GetAtt 'DouAuthProxyInstance.AvailabilityZone'
+  
+  DouAuthProxyInstanceHostName:
+    Description: 'The HostName of the Duo Authentication Proxy Server'
+    Value: !Ref EC2HostName
+    Export:
+      Name: DuoAuthproxy-HostName
+
+  DouAuthProxyInstanceIPAddress:
+    Description: 'The IP of the Duo Authentication Proxy Server'
+    Value: !GetAtt 'DouAuthProxyInstance.PrivateIp'
+    Export:
+      Name: DuoAuthproxy-IPAddress
